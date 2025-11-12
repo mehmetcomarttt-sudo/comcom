@@ -1,0 +1,479 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Uzay Kaçağı Oyunu</title>
+    <!-- Tailwind CSS ve özel stil ile karanlık, uzay teması -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0d1117; /* Karanlık uzay rengi */
+            color: #ffffff;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-direction: column;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+        #game-container {
+            width: 95vw;
+            max-width: 500px;
+            aspect-ratio: 1 / 1.5; /* Dikey oyun alanı */
+            border: 3px solid #6366f1; /* Mor kenarlık */
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.5);
+            /* Başlangıç arka planı */
+            background: radial-gradient(circle at center, rgba(17, 24, 39, 1) 0%, rgba(0, 0, 0, 1) 100%);
+            position: relative;
+            transition: background 1s ease-in-out; /* Arka plan geçişi */
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+        .control-button {
+            @apply p-4 m-2 bg-gray-700 text-white rounded-full text-xl shadow-lg hover:bg-gray-600 transition duration-150 active:bg-gray-800;
+            width: 80px;
+            height: 80px;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+        }
+        #mobile-controls {
+            @apply flex justify-center mt-4 w-full max-w-sm;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container">
+        <canvas id="gameCanvas"></canvas>
+        
+        <!-- Skor ve Durum Paneli -->
+        <div id="score-panel" class="absolute top-0 left-0 w-full p-3 flex justify-between text-lg font-bold">
+            <span id="score">Puan: 0</span>
+            <span id="level">Seviye: 1</span>
+        </div>
+
+        <!-- Başlangıç/Bitiş Mesajı -->
+        <div id="message-overlay" class="absolute inset-0 flex items-center justify-center bg-black bg-opacity-70 text-center rounded-lg transition-opacity duration-300">
+            <div>
+                <h2 class="text-3xl font-bold text-yellow-400 mb-4">UZAY KAÇAĞI</h2>
+                <p class="text-xl mb-6">Meteorlardan kaç ve onları vur!</p>
+                <button id="start-button" class="bg-green-600 hover:bg-green-700 text-white font-bold py-3 px-8 rounded-full shadow-xl transition duration-150">BAŞLA</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Mobil Kontroller -->
+    <div id="mobile-controls" class="md:hidden">
+        <button id="left-button" class="control-button">
+            <!-- Sol Ok SVG -->
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></svg>
+        </button>
+        <button id="fire-button" class="control-button bg-red-600 hover:bg-red-700">
+            <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></svg>
+        </button>
+        <button id="right-button" class="control-button">
+            <!-- Sağ Ok SVG -->
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </button>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const startButton = document.getElementById('start-button');
+        const messageOverlay = document.getElementById('message-overlay');
+        const scoreDisplay = document.getElementById('score');
+        const levelDisplay = document.getElementById('level');
+        const gameContainer = document.getElementById('game-container');
+        
+        // Mobil Kontrol Butonları
+        const leftButton = document.getElementById('left-button');
+        const rightButton = document.getElementById('right-button');
+        const fireButton = document.getElementById('fire-button'); // Yeni ateş butonu
+
+        // Oyun Ayarları
+        let gameLoopId;
+        let gameOver = true;
+        let score = 0;
+        let currentLevel = 1;
+        const levelThreshold = 5000;
+        let lastTime = 0;
+        let accumulator = 0;
+        const fixedDeltaTime = 1000 / 60; // 60 FPS hedef
+
+        // Seviye Arka Plan Renkleri (CSS Gradientler)
+        const LEVEL_COLORS = [
+            'radial-gradient(circle at center, rgba(17, 24, 39, 1) 0%, rgba(0, 0, 0, 1) 100%)', // Lvl 1: Derin Mavi/Siyah
+            'linear-gradient(135deg, #2a0a38 0%, #000000 100%)',                             // Lvl 2: Koyu Mor
+            'linear-gradient(135deg, #0a2a10 0%, #000000 100%)',                             // Lvl 3: Koyu Yeşil
+            'linear-gradient(135deg, #2a1a0a 0%, #000000 100%)',                             // Lvl 4: Koyu Kahverengi/Kızıl
+            'linear-gradient(135deg, #10102a 0%, #000000 100%)',                             // Lvl 5: Daha Koyu Mavi
+            'linear-gradient(135deg, #301010 0%, #000000 100%)',                             // Lvl 6: Koyu Kırmızı
+        ];
+
+        // Uzay Gemisi Ayarları
+        const ship = {
+            width: 30,
+            height: 40,
+            x: 0,
+            y: 0,
+            speed: 5,
+            dx: 0
+        };
+
+        // Atış Ayarları
+        let bullets = [];
+        const bulletSpeed = 10;
+        const shootCooldown = 300; // Mermi bekleme süresi (ms)
+        let lastShotTime = 0;
+
+        // Meteor Ayarları
+        let meteors = [];
+        let baseMeteorSpeed = 1.5; // Başlangıçta daha yavaş
+        let meteorSpeed = baseMeteorSpeed;
+        let meteorSpawnRate = 60; // Her 60 frame'de bir meteor
+        let frameCount = 0;
+        const METEOR_SIZE_MIN = 15;
+        const METEOR_SIZE_MAX = 30;
+
+        // --- Yardımcı Fonksiyonlar ---
+
+        function updateBackground() {
+            // Seviyeye göre arka plan rengini değiştir
+            const colorIndex = (currentLevel - 1) % LEVEL_COLORS.length;
+            gameContainer.style.background = LEVEL_COLORS[colorIndex];
+        }
+
+        function resizeCanvas() {
+            const container = document.getElementById('game-container');
+            canvas.width = container.clientWidth;
+            canvas.height = container.clientHeight;
+            
+            ship.x = canvas.width / 2 - ship.width / 2;
+            ship.y = canvas.height - ship.height - 20;
+            
+            updateBackground(); // Başlangıç rengini ayarla
+        }
+
+        // --- Oyun Nesneleri ---
+
+        // Mermi Sınıfı
+        class Bullet {
+            constructor(x, y) {
+                this.width = 4;
+                this.height = 15;
+                this.x = x - this.width / 2;
+                this.y = y;
+            }
+
+            draw() {
+                ctx.fillStyle = '#ffcc00';
+                ctx.fillRect(this.x, this.y, this.width, this.height);
+            }
+
+            update() {
+                this.y -= bulletSpeed;
+            }
+        }
+
+        function drawShip() {
+            ctx.beginPath();
+            ctx.moveTo(ship.x + ship.width / 2, ship.y);
+            ctx.lineTo(ship.x + ship.width, ship.y + ship.height);
+            ctx.lineTo(ship.x, ship.y + ship.height);
+            ctx.closePath();
+            ctx.fillStyle = '#10b981';
+            ctx.fill();
+            ctx.strokeStyle = '#059669';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        class Meteor {
+            constructor() {
+                this.radius = METEOR_SIZE_MIN + Math.random() * (METEOR_SIZE_MAX - METEOR_SIZE_MIN);
+                this.x = this.radius + Math.random() * (canvas.width - this.radius * 2);
+                this.y = -this.radius; 
+                this.vy = meteorSpeed + Math.random() * 0.5;
+                this.color = `hsl(${Math.random() * 30 + 30}, 50%, 50%)`;
+            }
+
+            draw() {
+                ctx.beginPath();
+                ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.fill();
+            }
+
+            update() {
+                this.y += this.vy;
+            }
+        }
+
+        // --- Mekanik Fonksiyonlar ---
+
+        function shoot() {
+            const currentTime = performance.now();
+            if (currentTime - lastShotTime > shootCooldown) {
+                const bulletX = ship.x + ship.width / 2;
+                const bulletY = ship.y;
+                bullets.push(new Bullet(bulletX, bulletY));
+                lastShotTime = currentTime;
+            }
+        }
+
+        function checkBulletMeteorCollisions() {
+            let newBullets = [];
+
+            for (const bullet of bullets) {
+                let bulletHit = false;
+                
+                for (let i = 0; i < meteors.length; i++) {
+                    const meteor = meteors[i];
+
+                    const closestX = Math.max(bullet.x, Math.min(meteor.x, bullet.x + bullet.width));
+                    const closestY = Math.max(bullet.y, Math.min(meteor.y, bullet.y + bullet.height));
+                    
+                    const dx = meteor.x - closestX;
+                    const dy = meteor.y - closestY;
+                    
+                    const distanceSquared = (dx * dx) + (dy * dy);
+
+                    if (distanceSquared < (meteor.radius * meteor.radius)) {
+                        // Çarpışma oldu!
+                        bulletHit = true;
+                        
+                        // Puanı meteor boyutuna göre hesapla (Küçük meteorlar daha çok puan verir)
+                        const points = Math.floor(50 + (METEOR_SIZE_MAX - meteor.radius) * 15);
+                        score += points;
+
+                        // Meteoru listeden kaldır
+                        meteors.splice(i, 1); 
+
+                        // Seviye Kontrolü
+                        if (score >= currentLevel * levelThreshold) {
+                            currentLevel++;
+                            // Zorluğu artır
+                            meteorSpeed = baseMeteorSpeed + (currentLevel - 1) * 0.5; 
+                            meteorSpawnRate = Math.max(10, 60 - (currentLevel - 1) * 10); // Daha sık meteor
+                            levelDisplay.textContent = `Seviye: ${currentLevel}`;
+                            updateBackground();
+                        }
+
+                        break; 
+                    }
+                }
+
+                // Mermi bir meteora çarpmadıysa ve hala ekrandaysa yeni listeye ekle
+                if (!bulletHit && bullet.y + bullet.height > 0) {
+                    newBullets.push(bullet);
+                }
+            }
+
+            bullets = newBullets;
+        }
+
+
+        function checkCollisions() {
+            // Geminin meteorlara çarpışmasını kontrol eder (Oyun biter)
+            const shipRect = {
+                left: ship.x,
+                top: ship.y,
+                right: ship.x + ship.width,
+                bottom: ship.y + ship.height
+            };
+
+            for (const meteor of meteors) {
+                const closestX = Math.max(shipRect.left, Math.min(meteor.x, shipRect.right));
+                const closestY = Math.max(shipRect.top, Math.min(meteor.y, shipRect.bottom));
+                
+                const dx = meteor.x - closestX;
+                const dy = meteor.y - closestY;
+                
+                const distanceSquared = (dx * dx) + (dy * dy);
+
+                if (distanceSquared < (meteor.radius * meteor.radius)) {
+                    // Çarpışma oldu!
+                    endGame("Geminiz bir meteora çarptı!");
+                    return;
+                }
+            }
+        }
+
+        function updateGame() {
+            // Geminin hareketini güncelle
+            ship.x += ship.dx;
+
+            // Kenar kontrolü
+            if (ship.x < 0) ship.x = 0;
+            if (ship.x + ship.width > canvas.width) ship.x = canvas.width - ship.width;
+
+            // Bulletleri güncelle
+            bullets.forEach(bullet => bullet.update());
+            
+            let missedMeteor = false;
+
+            // Meteorları güncelle ve ekran dışına çıkanları kontrol et
+            meteors = meteors.filter(meteor => {
+                meteor.update();
+                
+                // YENİ KONTROL: Meteor ekranın alt sınırını geçti mi?
+                if (meteor.y - meteor.radius > canvas.height) {
+                    missedMeteor = true;
+                    return false; // Bu meteoru listeden kaldır
+                }
+
+                return true;
+            });
+
+            // Eğer kaçan bir meteor varsa, oyunu bitir
+            if (missedMeteor) {
+                endGame("Bir meteor kaçtı ve gezegenimizi vurdu!");
+                return;
+            }
+
+            // Meteor oluşturma
+            frameCount++;
+            if (frameCount % meteorSpawnRate === 0) {
+                meteors.push(new Meteor());
+            }
+
+            // Çarpışma kontrolleri
+            checkBulletMeteorCollisions(); // Mermi-Meteor kontrolü
+            checkCollisions();             // Gemi-Meteor kontrolü
+
+            // Skor Güncelleme
+            scoreDisplay.textContent = `Puan: ${score}`;
+        }
+
+        function drawGame() {
+            // Canvas'ı temizle
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Meteorları çiz
+            meteors.forEach(m => m.draw());
+
+            // Mermileri çiz
+            bullets.forEach(b => b.draw());
+
+            // Gemiyi çiz
+            drawShip();
+        }
+
+        // --- Oyun Döngüsü ---
+
+        function gameLoop(currentTime) {
+            if (gameOver) return;
+
+            const deltaTime = currentTime - lastTime;
+            lastTime = currentTime;
+            accumulator += deltaTime;
+
+            while (accumulator >= fixedDeltaTime) {
+                updateGame();
+                accumulator -= fixedDeltaTime;
+            }
+
+            drawGame();
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        function startGame() {
+            if (!gameOver) return;
+
+            // Oyunu sıfırla
+            gameOver = false;
+            score = 0;
+            currentLevel = 1;
+            meteorSpeed = baseMeteorSpeed;
+            meteorSpawnRate = 60;
+            meteors = [];
+            bullets = [];
+            lastShotTime = performance.now(); 
+            ship.x = canvas.width / 2 - ship.width / 2;
+            ship.dx = 0;
+            
+            scoreDisplay.textContent = `Puan: 0`;
+            levelDisplay.textContent = `Seviye: 1`;
+            updateBackground(); // Arka planı sıfırla
+
+            messageOverlay.style.opacity = '0';
+            messageOverlay.style.pointerEvents = 'none';
+
+            // Oyun döngüsünü başlat
+            lastTime = performance.now();
+            accumulator = 0;
+            gameLoopId = requestAnimationFrame(gameLoop);
+        }
+
+        function endGame(reason) {
+            gameOver = true;
+            cancelAnimationFrame(gameLoopId);
+            
+            // Sonuç ekranını göster
+            const messageDiv = messageOverlay.querySelector('div');
+            messageDiv.innerHTML = `
+                <h2 class="text-3xl font-bold text-red-500 mb-4">OYUN BİTTİ!</h2>
+                <p class="text-xl text-yellow-300 mb-2">${reason}</p>
+                <p class="text-2xl text-white mb-6">Son Puanınız: ${score} (Seviye ${currentLevel})</p>
+                <button id="restart-button" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-8 rounded-full shadow-xl transition duration-150">YENİDEN DENE</button>
+            `;
+            messageOverlay.style.opacity = '1';
+            messageOverlay.style.pointerEvents = 'auto';
+            document.getElementById('restart-button').addEventListener('click', startGame);
+        }
+
+        // --- Input Yönetimi ---
+
+        function setShipMovement(direction) {
+            ship.dx = direction * ship.speed;
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (gameOver) return;
+            if (e.key === 'ArrowLeft') setShipMovement(-1);
+            if (e.key === 'ArrowRight') setShipMovement(1);
+            if (e.key === ' ') { 
+                e.preventDefault(); 
+                shoot();
+            }
+        });
+
+        document.addEventListener('keyup', (e) => {
+            if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') setShipMovement(0);
+        });
+        
+        // Mobil buton olayları
+        const startTouch = (e, direction) => { e.preventDefault(); setShipMovement(direction); };
+        const endTouch = () => setShipMovement(0);
+
+        leftButton.addEventListener('touchstart', (e) => startTouch(e, -1), { passive: false });
+        leftButton.addEventListener('touchend', endTouch);
+        leftButton.addEventListener('mousedown', (e) => startTouch(e, -1));
+        leftButton.addEventListener('mouseup', endTouch);
+
+        rightButton.addEventListener('touchstart', (e) => startTouch(e, 1), { passive: false });
+        rightButton.addEventListener('touchend', endTouch);
+        rightButton.addEventListener('mousedown', (e) => startTouch(e, 1));
+        rightButton.addEventListener('mouseup', endTouch);
+        
+        fireButton.addEventListener('touchstart', (e) => { e.preventDefault(); shoot(); }, { passive: false });
+        fireButton.addEventListener('mousedown', shoot); // Masaüstü simülasyonu için
+
+        // --- Başlangıç ---
+        window.addEventListener('load', resizeCanvas);
+        window.addEventListener('resize', resizeCanvas);
+        startButton.addEventListener('click', startGame);
+
+    </script>
+</body>
+</html>
